@@ -33,19 +33,21 @@ class PubMedManager(object):
         aff_path = 'AffiliationInfo'
         
         affiliations = []
-        try:
-            for aff in e.find(aff_path).getchildren():
+        aff_parent = e.find(aff_path)
+        if aff_parent is not None:
+            for aff in aff_parent.getchildren():
                 affiliations.append(aff.text)
-        except AttributeError:
-            pass
+
         return affiliations
 
     def handle_authors(self, e, date):
         al_path = 'PubmedArticle/MedlineCitation/Article/AuthorList'
         _a = AuthorManager(self.root['authors'])
+
         authors = []
-        try:
-            for author in e.find(al_path).getchildren():
+        al = e.find(al_path)
+        if al is not None:
+            for author in al.getchildren():
                 a = _a.get_or_create(
                     last_name = (author.find('LastName').text or None),
                     fore_name = (author.find('ForeName').text or None),
@@ -56,8 +58,7 @@ class PubMedManager(object):
                     a.add_affiliation(aff, date)
 
                 authors.append(a)
-        except AttributeError:    # No authors.
-            pass
+
         return authors
 
     def handle_headings(self, e):
@@ -67,26 +68,31 @@ class PubMedManager(object):
         _h = HeadingManager(self.root['headings'])
         
         headings = []
-        for heading in e.find(mh_path).getchildren():
-            ds = heading.find('DescriptorName')
-            ql = heading.find('QualifierName')
+        mh = e.find(mh_path)
+        if mh is not None:
+            for heading in mh.getchildren():
+                ds = heading.find('DescriptorName')
+                ql = heading.find('QualifierName')
+                
+                if ds is not None:
+                    descriptor = _e.get_or_create(
+                        mt=ds.attrib['MajorTopicYN'] == 'Y',
+                        ui=ds.attrib['UI'],
+                        term=ds.text)
+        
+                    if ql is not None:
+                        qualifier = _e.get_or_create(
+                            mt=ql.attrib['MajorTopicYN'] == 'Y',
+                            ui=ql.attrib['UI'],
+                            term=ql.text
+                        )
+                    else:
+                        qualifier = None
 
-            descriptor = _e.get_or_create(
-                mt=ds.attrib['MajorTopicYN'] == 'Y',
-                ui=ds.attrib['UI'],
-                term=ds.text)
-            
-            if ql is not None:
-                qualifier = _e.get_or_create(
-                    mt=ql.attrib['MajorTopicYN'] == 'Y',
-                    ui=ql.attrib['UI'],
-                    term=ql.text
-                )
-            else:
-                qualifier = None
+                    h = _h.get_or_create(desc=descriptor, qual=qualifier)
+                    headings.append(h)
 
-            h = _h.get_or_create(desc=descriptor, qual=qualifier)
-            headings.append(h)
+
         return headings
     
     def handle_grants(self, e):
