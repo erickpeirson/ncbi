@@ -48,10 +48,19 @@ class PubMedManager(object):
         al = e.find(al_path)
         if al is not None:
             for author in al.getchildren():
+                lname_elem = author.find('LastName')
+                fname_elem = author.find('ForeName')
+                init_elem = author.find('Initials')
+                if lname_elem is not None:  last_name = lname_elem.text 
+                else:                       last_name = None
+                if fname_elem is not None:  fore_name = fname_elem.text
+                else:                       fore_name = None   
+                if init_elem is not None:   initials = init_elem.text
+                else:                       initials = None                  
                 a = _a.get_or_create(
-                    last_name = (author.find('LastName').text or None),
-                    fore_name = (author.find('ForeName').text or None),
-                    initials = (author.find('Initials').text or None)           
+                    fore_name = fore_name,
+                    last_name = last_name,
+                    initials = initials           
                 )
 
                 for aff in self.handle_affiliations(author, date):
