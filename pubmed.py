@@ -9,6 +9,16 @@ from unidecode import unidecode
 from datatypes import *
 from managers import *
 
+def get_smart(e, element):
+    elem = e.find(element)
+    if elem is not None:     
+        text = elem.text
+        if text is not None: 
+            text = unidecode(text)
+    else:
+        text = ''
+    return text
+    
 class PubMedManager(object):
     def __init__(self, manager=Neo4jManager):
         self.endpoint = 'http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db={db}&id={id}&rettype=xml'
@@ -31,8 +41,9 @@ class PubMedManager(object):
         aff_parent = e.find(aff_path)
         if aff_parent is not None:
             for aff in aff_parent.getchildren():
-                i = self.manager.get_or_create(Institution(name=unidecode(aff.text)))
-                affiliations.append(i)
+                if aff.text is not None:
+                    i = self.manager.get_or_create(Institution(name=unidecode(aff.text)))
+                    affiliations.append(i)
 
         return affiliations
 
@@ -43,20 +54,10 @@ class PubMedManager(object):
         al = e.find(al_path)
         if al is not None:
             for author in al.getchildren():
-                lname_elem = author.find('LastName')
-                fname_elem = author.find('ForeName')
-                init_elem = author.find('Initials')
-                if lname_elem is not None:  last_name = unidecode(lname_elem.text)
-                else:                       last_name = None
-                if fname_elem is not None:  fore_name = unidecode(fname_elem.text)
-                else:                       fore_name = None   
-                if init_elem is not None:   initials = unidecode(init_elem.text)
-                else:                       initials = None
-
                 a = self.manager.get_or_create(Author(
-                    fore_name = fore_name,
-                    last_name = last_name,
-                    initials = initials           
+                    fore_name = get_smart(author, 'ForeName')
+                    last_name = get_smart(author, 'LastName')
+                    initials = get_smart(author, 'Initials')
                 ))
 
                 for aff in self.handle_affiliations(author):
@@ -73,16 +74,9 @@ class PubMedManager(object):
         mh = e.find(mh_path)
         if mh is not None:
             for heading in mh.getchildren():
-                ds = heading.find('DescriptorName')
-                ql = heading.find('QualifierName')
-                
-                if ds is not None:
-                    descriptor = ds.text
-                    if ql is not None:
-                        qualifier = ql.text
-                    else:
-                        qualifier = None
-
+                descriptor = get_smart(heading, 'DescriptorName')
+                qualifier = get_smart(heading, 'QualifierName')
+                if descriptor != '':
                     h = self.manager.get_or_create(MeSHHeading(
                             descriptor=descriptor,
                             qualifier=qualifier
@@ -99,34 +93,26 @@ class PubMedManager(object):
 
         if gl is not None:
             for grant in gl.getchildren():
-                id_elem = grant.find('GrantID')
-                ac_elem = grant.find('Acronym')
-                ag_elem = grant.find('Agency')
-                co_elem = grant.find('Country')
 
-                if id_elem is not None:         grant_id = unidecode(id_elem.text)
-                else:                           grant_id = None
-                if ac_elem is not None:         acronym = unidecode(ac_elem.text)
-                else:                           acronym = None
-                if ag_elem is not None:         agency = unidecode(ag_elem.text)
-                else:                           agency = None
-                if co_elem is not None:         country = unidecode(co_elem.text)
-                else:                           country = None
+                grant_id = get_smart(grant, 'GrantID')
+                acronym = get_smart(grant, 'Acronym')
+                agency = get_smart(grant, 'Agency')
+                country = get_smart(grant, 'Country')
 
-                if agency is not None:
+                if agency is != '':
                     a = self.manager.get_or_create(Agency(
                             name = agency,
                             country = country
                         ))
 
-                if grant_id is not None:
+                if grant_id != '':
                     g = self.manager.get_or_create(Grant(
                             grant_id = grant_id,
                             acronym = acronym
                         ))
                     grants.append(g)
 
-                if agency is not None and grant_id is not None:
+                if agency != '' and grant_id != '':
                     self.manager.create_relation(a, "AWARDED", g)
 
         return grants
@@ -134,13 +120,11 @@ class PubMedManager(object):
     def handle_journal(self, e):
         jnl = e.find('.//Journal')
         if jnl is not None:
-            issn_elem = jnl.find('.//ISSN')
-            title_elem = jnl.find('.//Title')
-
-            if issn_elem is not None:   issn = issn_elem.text
-            else:                       issn = None
-            if title_elem is not None:  title = unidecode(title_elem.text)
-            else:                       return # Don't proceed without title.
+            issn = get_smart(jnl, './/ISSN')
+            title = get_smart(jnl, './/Title')
+            
+            if title == '':
+                return
 
             return self.manager.get_or_create(Journal(issn=issn, title=title))
 
@@ -152,12 +136,10 @@ class PubMedManager(object):
     def process_paper(self, e, pmid):
 
         date = self.handle_date(e)
-        t_elem = e.find('.//ArticleTitle')
-        a_elem = e.find('.//AbstractText')
-        if t_elem is not None:      title = unidecode(t_elem.text)
-        else:                       title = ''
-        if a_elem is not None:      abstract = unidecode(a_elem.text)
-        else:                       abstract = ''
+
+        
+        title = get_smart(e, './/ArticleTitle')
+        abstract = get_smart(e, './/AbstractText')
 
         p = self.manager.get_or_create(Paper(
                 pmid=pmid,
