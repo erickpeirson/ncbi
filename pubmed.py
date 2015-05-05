@@ -31,7 +31,7 @@ class PubMedManager(object):
         aff_parent = e.find(aff_path)
         if aff_parent is not None:
             for aff in aff_parent.getchildren():
-                i = self.manager.get_or_create(Institution(name=aff.text))
+                i = self.manager.get_or_create(Institution(name=unidecode(aff.text)))
                 affiliations.append(i)
 
         return affiliations
@@ -46,11 +46,11 @@ class PubMedManager(object):
                 lname_elem = author.find('LastName')
                 fname_elem = author.find('ForeName')
                 init_elem = author.find('Initials')
-                if lname_elem is not None:  last_name = lname_elem.text 
+                if lname_elem is not None:  last_name = unidecode(lname_elem.text)
                 else:                       last_name = None
-                if fname_elem is not None:  fore_name = fname_elem.text
+                if fname_elem is not None:  fore_name = unidecode(fname_elem.text)
                 else:                       fore_name = None   
-                if init_elem is not None:   initials = init_elem.text
+                if init_elem is not None:   initials = unidecode(init_elem.text)
                 else:                       initials = None
 
                 a = self.manager.get_or_create(Author(
@@ -104,13 +104,13 @@ class PubMedManager(object):
                 ag_elem = grant.find('Agency')
                 co_elem = grant.find('Country')
 
-                if id_elem is not None:         grant_id = id_elem.text
+                if id_elem is not None:         grant_id = unidecode(id_elem.text)
                 else:                           grant_id = None
-                if ac_elem is not None:         acronym = ac_elem.text
+                if ac_elem is not None:         acronym = unidecode(ac_elem.text)
                 else:                           acronym = None
-                if ag_elem is not None:         agency = ag_elem.text
+                if ag_elem is not None:         agency = unidecode(ag_elem.text)
                 else:                           agency = None
-                if co_elem is not None:         country = co_elem.text
+                if co_elem is not None:         country = unidecode(co_elem.text)
                 else:                           country = None
 
                 if agency is not None:
@@ -139,7 +139,7 @@ class PubMedManager(object):
 
             if issn_elem is not None:   issn = issn_elem.text
             else:                       issn = None
-            if title_elem is not None:  title = title_elem.text
+            if title_elem is not None:  title = unidecode(title_elem.text)
             else:                       return # Don't proceed without title.
 
             return self.manager.get_or_create(Journal(issn=issn, title=title))
@@ -154,9 +154,9 @@ class PubMedManager(object):
         date = self.handle_date(e)
         t_elem = e.find('.//ArticleTitle')
         a_elem = e.find('.//AbstractText')
-        if t_elem is not None:      title = t_elem.text
+        if t_elem is not None:      title = unidecode(t_elem.text)
         else:                       title = ''
-        if a_elem is not None:      abstract = a_elem.text
+        if a_elem is not None:      abstract = unidecode(a_elem.text)
         else:                       abstract = ''
 
         p = self.manager.get_or_create(Paper(
