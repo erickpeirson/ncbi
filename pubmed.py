@@ -55,8 +55,8 @@ class PubMedManager(object):
         if al is not None:
             for author in al.getchildren():
                 a = self.manager.get_or_create(Author(
-                    fore_name = get_smart(author, 'ForeName')
-                    last_name = get_smart(author, 'LastName')
+                    fore_name = get_smart(author, 'ForeName'),
+                    last_name = get_smart(author, 'LastName'),
                     initials = get_smart(author, 'Initials')
                 ))
 
