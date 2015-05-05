@@ -99,7 +99,7 @@ class PubMedManager(object):
                 agency = get_smart(grant, 'Agency')
                 country = get_smart(grant, 'Country')
 
-                if agency is != '':
+                if agency != '':
                     a = self.manager.get_or_create(Agency(
                             name = agency,
                             country = country
