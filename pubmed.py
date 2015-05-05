@@ -7,17 +7,12 @@ import time
 from unidecode import unidecode
 
 from datatypes import *
-
-import ZODB
-from ZEO import ClientStorage
+from managers import *
 
 class PubMedManager(object):
-    def __init__(self, server, port, tree):
-        self.storage = ClientStorage.ClientStorage((server, port))
-        self.db = ZODB.DB(self.storage)
-        self.conn = self.db.open()
-        self.root = getattr(self.conn.root(), tree)
+    def __init__(self, manager=Neo4jManager):
         self.endpoint = 'http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db={db}&id={id}&rettype=xml'
+        self.manager = manager()
 
     def handle_date(self, e):
         dt_path = 'PubmedArticle/MedlineCitation/DateCreated'
@@ -29,20 +24,20 @@ class PubMedManager(object):
         
         return year, month, day
 
-    def handle_affiliations(self, e, date):
+    def handle_affiliations(self, e):
         aff_path = 'AffiliationInfo'
         
         affiliations = []
         aff_parent = e.find(aff_path)
         if aff_parent is not None:
             for aff in aff_parent.getchildren():
-                affiliations.append(aff.text)
+                i = self.manager.get_or_create(Institution(name=aff.text))
+                affiliations.append(i)
 
         return affiliations
 
     def handle_authors(self, e, date):
         al_path = 'PubmedArticle/MedlineCitation/Article/AuthorList'
-        _a = AuthorManager(self.root['authors'])
 
         authors = []
         al = e.find(al_path)
@@ -56,15 +51,16 @@ class PubMedManager(object):
                 if fname_elem is not None:  fore_name = fname_elem.text
                 else:                       fore_name = None   
                 if init_elem is not None:   initials = init_elem.text
-                else:                       initials = None                  
-                a = _a.get_or_create(
+                else:                       initials = None
+
+                a = self.manager.get_or_create(Author(
                     fore_name = fore_name,
                     last_name = last_name,
                     initials = initials           
-                )
+                ))
 
-                for aff in self.handle_affiliations(author, date):
-                    a.add_affiliation(aff, date)
+                for aff in self.handle_affiliations(author):
+                    self.manager.create_relation(a, "AFFILIATED", aff, {"year":date[0], "month":date[1], "day":date[2]})
 
                 authors.append(a)
 
@@ -72,9 +68,6 @@ class PubMedManager(object):
 
     def handle_headings(self, e):
         mh_path = 'PubmedArticle/MedlineCitation/MeshHeadingList'
-
-        _e = ElementManager(self.root['elements'])
-        _h = HeadingManager(self.root['headings'])
         
         headings = []
         mh = e.find(mh_path)
@@ -84,76 +77,108 @@ class PubMedManager(object):
                 ql = heading.find('QualifierName')
                 
                 if ds is not None:
-                    descriptor = _e.get_or_create(
-                        mt=ds.attrib['MajorTopicYN'] == 'Y',
-                        ui=ds.attrib['UI'],
-                        term=ds.text)
-        
+                    descriptor = ds.text
                     if ql is not None:
-                        qualifier = _e.get_or_create(
-                            mt=ql.attrib['MajorTopicYN'] == 'Y',
-                            ui=ql.attrib['UI'],
-                            term=ql.text
-                        )
+                        qualifier = ql.text
                     else:
                         qualifier = None
 
-                    h = _h.get_or_create(desc=descriptor, qual=qualifier)
+                    h = self.manager.get_or_create(MeSHHeading(
+                            descriptor=descriptor,
+                            qualifier=qualifier
+                        ))
                     headings.append(h)
-
 
         return headings
     
     def handle_grants(self, e):
         gl_path = 'PubmedArticle/MedlineCitation/Article/GrantList'
-        
-        _g = GrantManager(self.root['grants'])
+
         grants = []
-        try:
-            for grant in e.find(gl_path).getchildren():
-                grant_id = (grant.find('GrantID').text or None)
-                acronym = (grant.find('Acronym').text or None)
-                agency = (grant.find('Agency').text or None)
-                country = (grant.find('Country').text or None)
-                g = _g.get_or_create(
-                    grant_id = grant_id,
-                    acronym = acronym,
-                    agency = agency,
-                    country = country
-                )
-                grants.append(g)        
-        except AttributeError:    # No grant data available.
-            pass
+        gl = e.find(gl_path)
+
+        if gl is not None:
+            for grant in gl.getchildren():
+                id_elem = grant.find('GrantID')
+                ac_elem = grant.find('Acronym')
+                ag_elem = grant.find('Agency')
+                co_elem = grant.find('Country')
+
+                if id_elem is not None:         grant_id = id_elem.text
+                else:                           grant_id = None
+                if ac_elem is not None:         acronym = ac_elem.text
+                else:                           acronym = None
+                if ag_elem is not None:         agency = ag_elem.text
+                else:                           agency = None
+                if co_elem is not None:         country = co_elem.text
+                else:                           country = None
+
+                if agency is not None:
+                    a = self.manager.get_or_create(Agency(
+                            name = agency,
+                            country = country
+                        ))
+
+                if grant_id is not None:
+                    g = self.manager.get_or_create(Grant(
+                            grant_id = grant_id,
+                            acronym = acronym
+                        ))
+                    grants.append(g)
+
+                if agency is not None and grant_id is not None:
+                    self.manager.create_relation(a, "AWARDED", g)
+
         return grants
-    
+
+    def handle_journal(self, e):
+        jnl = e.find('.//Journal')
+        if jnl is not None:
+            issn_elem = jnl.find('.//ISSN')
+            title_elem = jnl.find('.//Title')
+
+            if issn_elem is not None:   issn = issn_elem.text
+            else:                       issn = None
+            if title_elem is not None:  title = title_elem.text
+            else:                       return # Don't proceed without title.
+
+            return self.manager.get_or_create(Journal(issn=issn, title=title))
+
     def get_paper(self, pmid):
         response_content = urllib2.urlopen(self.endpoint.format(db='pubmed', id=pmid)).read()
         e = ET.fromstring(response_content)
         return e
 
     def process_paper(self, e, pmid):
-        if pmid in self.root['papers'].keys():
-            return self.root['papers'][pmid]
-        else:
-            try:
-                date = self.handle_date(e)
 
-                p = Paper(pmid, e)
-                grants = self.handle_grants(e)
-                p.add_grant(grants)
+        date = self.handle_date(e)
+        t_elem = e.find('.//ArticleTitle')
+        a_elem = e.find('.//AbstractText')
+        if t_elem is not None:      title = t_elem.text
+        else:                       title = ''
+        if a_elem is not None:      abstract = a_elem.text
+        else:                       abstract = ''
 
-                authors = self.handle_authors(e, date)
-                p.add_author(authors)
+        p = self.manager.get_or_create(Paper(
+                pmid=pmid,
+                year=date[0],
+                title=title,
+                abstract=abstract
+            ))
+        grants = self.handle_grants(e)
+        for grant in grants:
+            self.manager.create_relation(p, "FUNDED_BY", grant)
 
-                headings = self.handle_headings(e)
-                p.add_heading(headings)
+        authors = self.handle_authors(e, date)
+        for author in authors:
+            self.manager.create_relation(p, "HAS_AUTHOR", author, {"year":date[0], "month":date[1], "day":date[2]})
 
-                self.root['papers'][pmid] = p
-                
-                # Save changes to database.
-                transaction.commit()
-            except:
-                # Abandon all attempted changes for this paper.
-                transaction.abort()
-                raise   # Last Exception.
+        headings = self.handle_headings(e)
+        for heading in headings:
+            self.manager.create_relation(p, "HAS_HEADING", heading)
+
+        journal = self.handle_journal(e)
+        if journal is not None:
+            self.manager.create_relation(p, "PUBLISHED_IN", journal, {"year": date[0], "month": date[1], "day": date[2]})
+
         return p
